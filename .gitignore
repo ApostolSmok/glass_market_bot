@@ -1,0 +1,4 @@
+bot_token.txt
+build/
+.vscode/
+db_config.txt

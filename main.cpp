@@ -1,53 +1,74 @@
 #include <iostream>
-#include <pqxx/pqxx>
 #include <string>
 #include <windows.h>
+#include <pqxx/pqxx>
+#include <tgbot/tgbot.h>
+#include <fstream>
 
 int main() {
     SetConsoleOutputCP(CP_UTF8);
+
+    std::string conn_str;
+    std::ifstream db_file("db_config.txt");
+    
+    if (db_file.is_open()) {
+        std::getline(db_file, conn_str);
+        db_file.close();
+    } else {
+        std::cerr << "[ERROR] Не удалось найти файл db_config.txt! Убедись, что он лежит в корне проекта." << std::endl;
+        return 1;
+    }
     try {
-        //(имя базы, пользователь, пароль)
-        std::string connection_string = "dbname=glass_market user=postgres password=1235 host=127.0.0.1 port=5432";
-        pqxx::connection C(connection_string);
-        
+        pqxx::connection C(conn_str);
         if (C.is_open()) {
-            std::cout << "Успешное подключение к БД: " << C.dbname() << std::endl;
-        } else {
-            std::cerr << "Ошибка подключения к БД" << std::endl;
-            return 1;
+            std::cout << "[OK] Подключение к БД: " << C.dbname() << std::endl;
         }
-
-        pqxx::work W(C);
-
-        std::string sql = R"(
-            SELECT p.name, p.thickness_mm, ph.price, ph.currency 
-            FROM products p
-            JOIN price_history ph ON p.id = ph.product_id
-            ORDER BY ph.scraped_at DESC
-            LIMIT 5;
-        )";
-
-        pqxx::result R = W.exec(sql);
-
-        std::cout << "Актуальные цены на стекло:" << std::endl;
-        for (auto const& row : R) {
-            std::string name = row[0].c_str();
-            double thickness = row[1].as<double>();
-            double price = row[2].as<double>();
-            std::string currency = row[3].c_str();
-
-            std::cout << "Товар: " << name << " (" << thickness << " мм) "
-                      << "- Цена: " << price << " " << currency << std::endl;
-        }
-        
-        W.commit();
-        
-    } catch (const pqxx::sql_error& e) {
-        std::cerr << "SQL Ошибка: " << e.what() << "\nЗапрос: " << e.query() << std::endl;
-        return 1;
     } catch (const std::exception& e) {
-        std::cerr << "Общая ошибка: " << e.what() << std::endl;
+        std::cerr << "[ERROR] Ошибка БД: " << e.what() << std::endl;
         return 1;
+    }
+
+    std::string bot_token;
+    std::ifstream token_file("bot_token.txt");
+    
+    if (token_file.is_open()) {
+        std::getline(token_file, bot_token);
+        token_file.close();
+    } else {
+        std::cerr << "[ERROR] Не удалось найти файл bot_token.txt! Убедись, что он лежит рядом с программой или в корне проекта." << std::endl;
+        return 1; 
+    }
+    TgBot::Bot bot(bot_token);
+
+    bot.getEvents().onCommand("start", [&bot](TgBot::Message::Ptr message) {
+        bot.getApi().sendMessage(message->chat->id, "Привет! Я система аналитики рынка стеклоизделий. Напиши /prices для проверки базы.");
+    });
+
+    bot.getEvents().onCommand("prices", [&bot, &conn_str](TgBot::Message::Ptr message) {
+        try {
+            pqxx::connection C(conn_str);
+            pqxx::work W(C);
+            pqxx::result R = W.exec("SELECT p.name, ph.price FROM products p JOIN price_history ph ON p.id = ph.product_id LIMIT 5;");
+            
+            std::string reply = "Последние цены в базе:\n";
+            if (R.empty()) reply += "База пока пуста.";
+            for (auto const& row : R) {
+                reply += "- " + std::string(row[0].c_str()) + ": " + std::string(row[1].c_str()) + " BYN\n";
+            }
+            bot.getApi().sendMessage(message->chat->id, reply);
+        } catch (const std::exception& e) {
+            bot.getApi().sendMessage(message->chat->id, "Ошибка при запросе к БД.");
+        }
+    });
+
+    try {
+        std::cout << "[OK] Бот " << bot.getApi().getMe()->username << " запущен..." << std::endl;
+        TgBot::TgLongPoll longPoll(bot);
+        while (true) {
+            longPoll.start();
+        }
+    } catch (TgBot::TgException& e) {
+        std::cerr << "[ERROR] Ошибка Telegram API: " << e.what() << std::endl;
     }
 
     return 0;
