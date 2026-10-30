@@ -9,7 +9,7 @@
 #include <tgbot/tgbot.h>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
-using json = nlohmann::json;
+using json = nlohmann::json; 
 
 std::string fetch_api_data(const std::string& conn_str) {
     std::string report = "<b>Отчет парсера (JSON API):</b>\n\n";
