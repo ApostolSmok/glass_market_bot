@@ -1,9 +1,10 @@
-#include <iostream>
-#include <string>
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <pqxx/pqxx>
 #include <tgbot/tgbot.h>
 #include <fstream>
+#include <iostream>
+#include <string>
 
 int main() {
     SetConsoleOutputCP(CP_UTF8);
@@ -57,6 +58,7 @@ int main() {
             }
             bot.getApi().sendMessage(message->chat->id, reply);
         } catch (const std::exception& e) {
+            std::cerr << "Ошибка: " << e.what() << std::endl;
             bot.getApi().sendMessage(message->chat->id, "Ошибка при запросе к БД.");
         }
     });
