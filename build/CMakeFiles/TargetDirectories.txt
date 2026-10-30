@@ -1,3 +1,0 @@
-C:/Artiom/glass_market_bot/build/CMakeFiles/backend_app.dir
-C:/Artiom/glass_market_bot/build/CMakeFiles/ALL_BUILD.dir
-C:/Artiom/glass_market_bot/build/CMakeFiles/ZERO_CHECK.dir
