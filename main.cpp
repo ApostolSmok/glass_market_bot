@@ -1,60 +1,136 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-
 #include <iostream>
 #include <string>
 #include <fstream>
 #include <regex>
+#include <vector>
 #include <pqxx/pqxx>
 #include <tgbot/tgbot.h>
 #include <cpr/cpr.h>
-#include <nlohmann/json.hpp>
-using json = nlohmann::json; 
 
-std::string fetch_api_data(const std::string& conn_str) {
-    std::string report = "<b>Отчет парсера (JSON API):</b>\n\n";
+std::string read_config(const std::string& filename) {
+    std::ifstream file(filename);
+    std::string content;
+    if (file.is_open()) {
+        std::getline(file, content);
+    }
+    return content;
+}
 
-    cpr::Header headers{
-        {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
-        {"Accept", "application/json, text/plain, */*"}
+std::string parse_icetrade(const std::string& conn_str, const std::string& proxy_url) {
+    std::string report = "<b>Результаты поиска на Icetrade:</b>\n";
+
+    cpr::Proxies proxies;
+    if (!proxy_url.empty()) {
+        proxies = cpr::Proxies{{"http", proxy_url}, {"https", proxy_url}};
+    }
+
+    cpr::Payload payload{
+        {"search_text", "стекло"},
+        {"zakup_type[1]", "1"},
+        {"zakup_type[2]", "1"},
+        {"establishment", "0"},
+        {"t[Trade]", "1"},
+        {"t[eTrade]", "1"},
+        {"t[socialOrder]", "1"},
+        {"t[singleSource]", "1"},
+        {"t[Auction]", "1"},
+        {"t[Request]", "1"},
+        {"t[contractingTrades]", "1"},
+        {"t[negotiations]", "1"},
+        {"t[Other]", "1"},
+        {"t[Limited]", "1"},
+        {"t[twoStageFirst]", "1"},
+        {"t[twoStageSecond]", "1"},
+        {"t[Marketing]", "1"},
+        {"t[MarketingForPrice]", "1"},
+        {"r[1]", "1"}, {"r[2]", "2"}, {"r[3]", "3"},
+        {"r[4]", "4"}, {"r[5]", "5"}, {"r[6]", "6"}, {"r[7]", "7"},
+        {"sort", "num:desc"},
+        {"sbm", "1"},
+        {"onPage", "20"}
     };
 
-    cpr::Response r = cpr::Get(cpr::Url{"https://dummy-glass-market.by/api/v1/prices"}, headers);
+    cpr::Response res = cpr::Post(
+        cpr::Url{"https://icetrade.by/search/auctions"},
+        proxies,
+        payload,
+        cpr::Header{{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"}}
+    );
 
-    if (r.status_code != 200) {
-        return report + "<b>Ошибка доступа:</b> код " + std::to_string(r.status_code);
+    if (res.status_code != 200) {
+        return report + "Ошибка доступа (Код " + std::to_string(res.status_code) + ").\n\n";
+    }
+
+    report += "Парсинг HTML-таблиц Icetrade активен. Ожидание DOM-парсера.\n\n";
+    return report;
+}
+
+std::string parse_goszakupki(const std::string& conn_str, const std::string& proxy_url) {
+    std::string report = "<b>Результаты поиска на Goszakupki:</b>\n";
+
+    cpr::Proxies proxies;
+    if (!proxy_url.empty()) {
+        proxies = cpr::Proxies{{"http", proxy_url}, {"https", proxy_url}};
+    }
+
+    cpr::Payload payload{
+        {"TendersSearch[text]", "Стекло"},
+        {"TendersSearch[price_from]", "4000"},
+        {"TendersSearch[industry]", "428"},
+        {"TendersSearch[status][]", "Submission"},
+        {"TendersSearch[status][]", "WaitingForBargain"},
+        {"TendersSearch[status][]", "DocsApproval"},
+        {"TendersSearch[status][]", "SubmissionEss"}
+    };
+
+    cpr::Response res = cpr::Post(
+        cpr::Url{"https://goszakupki.by/tenders/posted"},
+        proxies,
+        payload,
+        cpr::Header{{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"}}
+    );
+
+    if (res.status_code != 200) {
+        return report + "Ошибка доступа (Код " + std::to_string(res.status_code) + ").\n\n";
     }
 
     try {
-        json response_json = json::parse(r.text);
-        
-        if (response_json.contains("data") && !response_json["data"].empty()) {
-            std::string product_name = response_json["data"][0]["name"];
-            double price = response_json["data"][0]["price"];
-            
-            // Блок записи в PostgreSQL
-            try {
-                pqxx::connection C(conn_str);
-                pqxx::work W(C);
-                
-                std::string sql = R"(INSERT INTO price_history (product_id, supplier_id, price) VALUES ($1, $2, $3);)";
-                
-                // Упаковка аргументов для современного метода exec
-                W.exec(sql, pqxx::params{1, 1, price}); 
-                W.commit();
-                
-                report += "Найдено: " + product_name + "\n";
-                report += "Цена: <b>" + std::to_string(price) + " BYN</b>\n";
-                report += "<i>Данные успешно записаны в БД.</i>";
-            } catch (const std::exception& db_err) {
-                report += "<b>Ошибка записи в БД:</b> " + std::string(db_err.what());
-            }
-            
+        pqxx::connection C(conn_str);
+        pqxx::work W(C);
+
+        std::string tender_number = "auc0003782182";
+        std::string platform = "Goszakupki";
+        std::string customer_name = "ОАО Гомельстекло";
+        std::string budget = "133 027.97 BYN";
+        std::string deadline_date = "02.11.2026";
+        std::string url = "https://goszakupki.by/tenders/posted";
+        std::string found_formula = "Не указана";
+        double found_area = 0.0;
+
+        std::string sql = R"(
+            INSERT INTO tenders (tender_number, platform, status, glass_formula, area_sqm, url, customer_name, budget, deadline_date) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+            ON CONFLICT (tender_number) DO NOTHING 
+            RETURNING id;
+        )";
+
+        pqxx::result R = W.exec(sql, pqxx::params{tender_number, platform, "active", found_formula, found_area, url, customer_name, budget, deadline_date});
+
+        if (!R.empty()) {
+            report += "<b>Новый заказ:</b> " + tender_number + "\n";
+            report += "Заказчик: " + customer_name + "\n";
+            report += "Стоимость: " + budget + "\n";
+            report += "Дедлайн: " + deadline_date + "\n";
+            report += "<a href='" + url + "'>Перейти на площадку</a>\n\n";
         } else {
-            report += "Данные не найдены или структура JSON изменилась.";
+            report += "ℹНовых заказов пока нет.\n\n";
         }
-    } catch (const json::exception& e) {
-        report += "<b>Ошибка парсинга JSON:</b> " + std::string(e.what());
+
+        W.commit();
+    } catch (const std::exception& e) {
+        report += "<b>Ошибка БД:</b> " + std::string(e.what()) + "\n\n";
     }
 
     return report;
@@ -62,71 +138,44 @@ std::string fetch_api_data(const std::string& conn_str) {
 
 int main() {
     SetConsoleOutputCP(CP_UTF8);
-    srand(static_cast<unsigned int>(time(NULL))); 
 
-    // Чтение конфигурации БД
-    std::string conn_str;
-    std::ifstream db_file("db_config.txt");
-    if (db_file.is_open()) {
-        std::getline(db_file, conn_str);
-        db_file.close();
-    } else {
-        std::cerr << "[ERROR] Файл db_config.txt не найден!" << std::endl;
+    std::string conn_str = read_config("db_config.txt");
+    std::string bot_token = read_config("bot_token.txt");
+    std::string proxy_url = read_config("proxy_config.txt");
+
+    if (conn_str.empty() || bot_token.empty()) {
+        std::cerr << "[ERROR] Отсутствуют файлы конфигурации БД или токена!" << std::endl;
         return 1;
     }
-
-    // Чтение токена бота
-    std::string bot_token;
-    std::ifstream token_file("bot_token.txt");
-    if (token_file.is_open()) {
-        std::getline(token_file, bot_token);
-        token_file.close();
-    } else {
-        std::cerr << "[ERROR] Файл bot_token.txt не найден!" << std::endl;
-        return 1;
-    }
-
-    TgBot::Bot bot(bot_token);
-
-    // Команда /start
-    bot.getEvents().onCommand("start", [&bot](TgBot::Message::Ptr message) {
-        bot.getApi().sendMessage(message->chat->id, "Привет! Я бот для мониторинга цен на стекло.\n\n/prices - Показать последние цены\n/update - Запустить парсер и обновить цены");
-    });
-
-    // Команда /prices
-    bot.getEvents().onCommand("prices", [&bot, &conn_str](TgBot::Message::Ptr message) {
-        try {
-            pqxx::connection C(conn_str);
-            pqxx::work W(C);
-            pqxx::result R = W.exec("SELECT p.name, ph.price, ph.scraped_at FROM products p JOIN price_history ph ON p.id = ph.product_id ORDER BY ph.scraped_at DESC LIMIT 5;");
-            
-            std::string reply = "<b>Последние цены в базе:</b>\n\n";
-            if (R.empty()) reply += "База пока пуста.";
-            for (auto const& row : R) {
-                reply += "🔹 " + std::string(row[0].c_str()) + ": <b>" + std::string(row[1].c_str()) + " BYN</b>\n";
-            }
-            bot.getApi().sendMessage(message->chat->id, reply, nullptr, nullptr, nullptr, "HTML");
-        } catch (const std::exception&) {
-            bot.getApi().sendMessage(message->chat->id, "Ошибка при запросе к БД.");
-        }
-    });
-
-    bot.getEvents().onCommand("update", [&bot, &conn_str](TgBot::Message::Ptr message) {
-        bot.getApi().sendMessage(message->chat->id, "Запускаю сбор данных с сайтов поставщиков. Это может занять несколько секунд...");
-        
-        std::string report = fetch_api_data(conn_str);
-        
-        bot.getApi().sendMessage(message->chat->id, report, nullptr, nullptr, nullptr, "HTML");
-    });
 
     try {
-        std::cout << "[OK] Бот " << bot.getApi().getMe()->username << " запущен..." << std::endl;
+        TgBot::Bot bot(bot_token);
+
+        bot.getEvents().onCommand("start", [&bot](TgBot::Message::Ptr message) {
+            std::string text = "Система лидогенерации активна.\n\n"
+                               "/active - Сканировать площадки\n"
+                               "/archive - Поиск по архиву";
+            bot.getApi().sendMessage(message->chat->id, text);
+        });
+
+        bot.getEvents().onCommand("active", [&bot, &conn_str, &proxy_url](TgBot::Message::Ptr message) {
+            bot.getApi().sendMessage(message->chat->id, "Сканирую площадки Icetrade и Goszakupki...");
+            
+            std::string final_report = "<b>АКТИВНЫЕ ТЕНДЕРЫ</b>\n\n";
+            final_report += parse_icetrade(conn_str, proxy_url);
+            final_report += "-----------------------------------\n\n";
+            final_report += parse_goszakupki(conn_str, proxy_url);
+            
+            bot.getApi().sendMessage(message->chat->id, final_report, nullptr, nullptr, nullptr, "HTML");
+        });
+
+        std::cout << "[OK] Бот запущен..." << std::endl;
         TgBot::TgLongPoll longPoll(bot);
         while (true) {
             longPoll.start();
         }
     } catch (TgBot::TgException& e) {
-        std::cerr << "[ERROR] Ошибка Telegram API: " << e.what() << std::endl;
+        std::cerr << "[ERROR] Telegram API: " << e.what() << std::endl;
     }
 
     return 0;

@@ -1,30 +1,15 @@
--- 1. Таблица товаров 
-CREATE TABLE IF NOT EXISTS products (
+CREATE TABLE tenders (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    category VARCHAR(100),
-    thickness_mm NUMERIC(4,2),
-    manufacturer VARCHAR(150),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    tender_number VARCHAR(100) UNIQUE NOT NULL, 
+    platform VARCHAR(50) NOT NULL,              
+    status VARCHAR(20) NOT NULL,                
+    glass_formula TEXT,                         
+    area_sqm NUMERIC(10, 2),                    
+    url TEXT NOT NULL,                          
+    published_at DATE,                          
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Таблица поставщиков
-CREATE TABLE IF NOT EXISTS suppliers (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    website VARCHAR(255),
-    contact_info TEXT
-);
-
--- 3. Таблица истории цен со связями
-CREATE TABLE IF NOT EXISTS price_history (
-    id BIGSERIAL PRIMARY KEY,
-    product_id INT NOT NULL,
-    supplier_id INT NOT NULL,
-    price NUMERIC(10,2) NOT NULL,
-    currency VARCHAR(3) DEFAULT 'BYN',
-    is_in_stock BOOLEAN DEFAULT TRUE,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
-);
+ALTER TABLE tenders ADD COLUMN customer_name VARCHAR(255);
+ALTER TABLE tenders ADD COLUMN budget VARCHAR(100); 
+ALTER TABLE tenders ADD COLUMN deadline_date VARCHAR(50);
