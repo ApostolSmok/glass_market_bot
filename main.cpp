@@ -163,7 +163,6 @@ int main() {
             
             std::string final_report = "<b>АКТИВНЫЕ ТЕНДЕРЫ</b>\n\n";
             final_report += parse_icetrade(conn_str, proxy_url);
-            final_report += "-----------------------------------\n\n";
             final_report += parse_goszakupki(conn_str, proxy_url);
             
             bot.getApi().sendMessage(message->chat->id, final_report, nullptr, nullptr, nullptr, "HTML");
