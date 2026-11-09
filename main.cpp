@@ -4,10 +4,11 @@
 #include <string>
 #include <fstream>
 #include <regex>
-#include <vector>
 #include <pqxx/pqxx>
 #include <tgbot/tgbot.h>
 #include <cpr/cpr.h>
+#include <iomanip>
+#include <sstream>
 
 std::string read_config(const std::string& filename) {
     std::ifstream file(filename);
@@ -18,121 +19,158 @@ std::string read_config(const std::string& filename) {
     return content;
 }
 
-std::string parse_icetrade(const std::string& conn_str, const std::string& proxy_url) {
-    std::string report = "<b>Результаты поиска на Icetrade:</b>\n";
-
-    cpr::Proxies proxies;
-    if (!proxy_url.empty()) {
-        proxies = cpr::Proxies{{"http", proxy_url}, {"https", proxy_url}};
-    }
-
-    cpr::Payload payload{
-        {"search_text", "стекло"},
-        {"zakup_type[1]", "1"},
-        {"zakup_type[2]", "1"},
-        {"establishment", "0"},
-        {"t[Trade]", "1"},
-        {"t[eTrade]", "1"},
-        {"t[socialOrder]", "1"},
-        {"t[singleSource]", "1"},
-        {"t[Auction]", "1"},
-        {"t[Request]", "1"},
-        {"t[contractingTrades]", "1"},
-        {"t[negotiations]", "1"},
-        {"t[Other]", "1"},
-        {"t[Limited]", "1"},
-        {"t[twoStageFirst]", "1"},
-        {"t[twoStageSecond]", "1"},
-        {"t[Marketing]", "1"},
-        {"t[MarketingForPrice]", "1"},
-        {"r[1]", "1"}, {"r[2]", "2"}, {"r[3]", "3"},
-        {"r[4]", "4"}, {"r[5]", "5"}, {"r[6]", "6"}, {"r[7]", "7"},
-        {"sort", "num:desc"},
-        {"sbm", "1"},
-        {"onPage", "20"}
-    };
-
-    cpr::Response res = cpr::Post(
-        cpr::Url{"https://icetrade.by/search/auctions"},
-        proxies,
-        payload,
-        cpr::Header{{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"}}
-    );
-
-    if (res.status_code != 200) {
-        return report + "Ошибка доступа (Код " + std::to_string(res.status_code) + ").\n\n";
-    }
-
-    report += "Парсинг HTML-таблиц Icetrade активен. Ожидание DOM-парсера.\n\n";
-    return report;
+std::string get_view_state(const std::string& text) {
+    std::smatch match;
+    std::regex ajax_regex(R"-(<update id="javax\.faces\.ViewState"><!\[CDATA\[([^\]]+)\]\]></update>)-");
+    if (std::regex_search(text, match, ajax_regex)) return match[1].str();
+    
+    std::regex html_regex(R"-(name="javax\.faces\.ViewState"[^>]*value="([^"]+)")-");
+    if (std::regex_search(text, match, html_regex)) return match[1].str();
+    
+    return "";
 }
 
-std::string parse_goszakupki(const std::string& conn_str, const std::string& proxy_url) {
-    std::string report = "<b>Результаты поиска на Goszakupki:</b>\n";
+std::string parse_butb(const std::string& conn_str, const std::string& proxy_url, int64_t chat_id) {
+    std::string report = "<b>Результаты поиска на БУТБ (Стекло):</b>\n\n";
+    bool found_new = false;
+    cpr::Session session;
 
-    cpr::Proxies proxies;
+    session.SetUrl(cpr::Url{"https://zakupki.butb.by/auctions/reestrauctions.html"});
     if (!proxy_url.empty()) {
-        proxies = cpr::Proxies{{"http", proxy_url}, {"https", proxy_url}};
+        session.SetProxies(cpr::Proxies{{"http", proxy_url}, {"https", proxy_url}});
+    }
+    
+    session.SetHeader(cpr::Header{{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"}});
+    cpr::Response res1 = session.Get();
+    if (res1.status_code != 200) return report + "Ошибка доступа к БУТБ.\n";
+
+    std::string view_state = get_view_state(res1.text);
+    if (view_state.empty()) return report + "Не удалось получить первичный ViewState.\n";
+
+    std::string expand_id = "fra:j_idt213"; 
+    std::smatch match;
+    std::regex exp_reg(R"-(id="(fra:j_idt\d+)"[^>]*>Раскрыть форму поиска)-");
+    if (std::regex_search(res1.text, match, exp_reg)) {
+        expand_id = match[1].str();
     }
 
-    cpr::Payload payload{
-        {"TendersSearch[text]", "Стекло"},
-        {"TendersSearch[price_from]", "4000"},
-        {"TendersSearch[industry]", "428"},
-        {"TendersSearch[status][]", "Submission"},
-        {"TendersSearch[status][]", "WaitingForBargain"},
-        {"TendersSearch[status][]", "DocsApproval"},
-        {"TendersSearch[status][]", "SubmissionEss"}
-    };
+    session.SetHeader(cpr::Header{
+        {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"},
+        {"Faces-Request", "partial/ajax"}
+    });
+    
+    session.SetPayload(cpr::Payload{
+        {"fra", "fra"},
+        {"javax.faces.ViewState", view_state},
+        {"javax.faces.source", expand_id},
+        {"javax.faces.partial.event", "click"},
+        {"javax.faces.partial.execute", "@all"},
+        {"javax.faces.partial.render", "@all"},
+        {"fra:j_idcl", expand_id},
+        {"ice.submit.type", "ice.s"},
+        {"javax.faces.partial.ajax", "true"}
+    });
+    
+    cpr::Response res2 = session.Post();
+    
+    std::string new_vs = get_view_state(res2.text);
+    if (!new_vs.empty()) view_state = new_vs;
 
-    cpr::Response res = cpr::Post(
-        cpr::Url{"https://goszakupki.by/tenders/posted"},
-        proxies,
-        payload,
-        cpr::Header{{"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"}}
-    );
+    std::string search_field = "fra:j_idt222";
+    std::string okrb_field = "fra:j_idt252";
+    std::string search_btn = "fra:_t320";
 
-    if (res.status_code != 200) {
-        return report + "Ошибка доступа (Код " + std::to_string(res.status_code) + ").\n\n";
-    }
+    std::regex sf_reg(R"-(Предмет закупки[\s\S]{0,300}?name="(fra:j_idt\d+)")-");
+    if (std::regex_search(res2.text, match, sf_reg)) search_field = match[1].str();
+
+    std::regex okrb_reg(R"-(Код ОКРБ[\s\S]{0,300}?name="(fra:j_idt\d+)")-");
+    if (std::regex_search(res2.text, match, okrb_reg)) okrb_field = match[1].str();
+
+    std::regex btn_reg(R"-(id="(fra:[^"]+)"[^>]*>Искать)-");
+    if (std::regex_search(res2.text, match, btn_reg)) search_btn = match[1].str();
+
+    session.SetPayload(cpr::Payload{
+        {"fra", "fra"},
+        {search_field, "стекло"},
+        {"fra:selProduct", "1"},
+        {okrb_field, "23.12.13.300"},
+        {"fra:_t328:0:_t331", "on"},
+        {"fra:_t328:1:_t331", "on"},
+        {"fra:_t328:2:_t331", "on"},
+        {"fra:_t328:3:_t331", "on"},
+        {"fra:_t328:4:_t331", "on"},
+        {"fra:_t328:6:_t331", "on"},
+        {"fra:_t328:7:_t331", "on"},
+        {"fra:_t328:8:_t331", "on"},
+        {"fra:_t328:9:_t331", "on"},
+        {"fra:_t328:10:_t331", "on"},
+        {"javax.faces.ViewState", view_state},
+        {"javax.faces.source", search_btn},
+        {"javax.faces.partial.event", "click"},
+        {"javax.faces.partial.execute", "@all"},
+        {"javax.faces.partial.render", "@all"},
+        {"ice.submit.type", "ice.s"},
+        {"javax.faces.partial.ajax", "true"}
+    });
+
+    cpr::Response res3 = session.Post();
+
+    std::regex row_regex(R"-(<tr[^>]*>[\s\S]*?>([A-Z]+\d+)[\s\S]*?>([\d&#;,\s]+)</span>[\s\S]*?BYN[\s\S]*?</tr>)-");
+    std::sregex_iterator currentMatch(res3.text.begin(), res3.text.end(), row_regex);
+    std::sregex_iterator lastMatch;
 
     try {
         pqxx::connection C(conn_str);
         pqxx::work W(C);
 
-        std::string tender_number = "auc0003782182";
-        std::string platform = "Goszakupki";
-        std::string customer_name = "ОАО Гомельстекло";
-        std::string budget = "133 027.97 BYN";
-        std::string deadline_date = "02.11.2026";
-        std::string url = "https://goszakupki.by/tenders/posted";
-        std::string found_formula = "Не указана";
-        double found_area = 0.0;
+        while (currentMatch != lastMatch) {
+            std::smatch sm = *currentMatch;
+            std::string tender_number = sm[1].str();
+            std::string raw_price = sm[2].str();
 
-        std::string sql = R"(
-            INSERT INTO tenders (tender_number, platform, status, glass_formula, area_sqm, url, customer_name, budget, deadline_date) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
-            ON CONFLICT (tender_number) DO NOTHING 
-            RETURNING id;
-        )";
+            raw_price = std::regex_replace(raw_price, std::regex(R"((BYN|byn|&nbsp;|&#160;|\s|[A-Za-zА-Яа-я]))"), "");
+            std::replace(raw_price.begin(), raw_price.end(), ',', '.');
+            
+            double price_value = 0.0;
+            try {
+                if (!raw_price.empty()) {
+                    price_value = std::stod(raw_price);
+                }
+            } catch (const std::exception&) {
+                currentMatch++;
+                continue; 
+            }
 
-        pqxx::result R = W.exec(sql, pqxx::params{tender_number, platform, "active", found_formula, found_area, url, customer_name, budget, deadline_date});
+            if (price_value >= 4000.0) {
+                std::string sql = R"(
+                    INSERT INTO tenders (tender_number, platform, status, budget, url, chat_id) 
+                    VALUES ($1, $2, $3, $4, $5, $6) 
+                    ON CONFLICT (tender_number, chat_id) DO NOTHING 
+                    RETURNING id;
+                )";
 
-        if (!R.empty()) {
-            report += "<b>Новый заказ:</b> " + tender_number + "\n";
-            report += "Заказчик: " + customer_name + "\n";
-            report += "Стоимость: " + budget + "\n";
-            report += "Дедлайн: " + deadline_date + "\n";
-            report += "<a href='" + url + "'>Перейти на площадку</a>\n\n";
-        } else {
-            report += "ℹНовых заказов пока нет.\n\n";
+                std::string tender_url = "https://zakupki.butb.by/auctions/reestrauctions.html";
+                pqxx::result R = W.exec(sql, pqxx::params{tender_number, "BUTB", "См. на сайте", std::to_string(price_value), tender_url, chat_id});
+
+                if (!R.empty()) {
+                    std::stringstream stream;
+                    stream << std::fixed << std::setprecision(2) << price_value;
+                    std::string formatted_price = stream.str();
+                    report += "<b>Тендер:</b> <code>" + tender_number + "</code>\n";
+                    report += "Сумма: <b>" + formatted_price + " BYN</b>\n";
+                    report += "<a href='https://zakupki.butb.by/auctions/reestrauctions.html'>Перейти на БУТБ</a>\n\n";
+                    
+                    found_new = true;
+                }
+            }
+            currentMatch++;
         }
-
         W.commit();
     } catch (const std::exception& e) {
-        report += "<b>Ошибка БД:</b> " + std::string(e.what()) + "\n\n";
+        return report + "<b>Ошибка БД:</b> " + std::string(e.what()) + "\n";
     }
 
+    if (!found_new) report += "Подходящих новых тендеров на стекло от 4000 BYN не найдено.\n";
     return report;
 }
 
@@ -144,7 +182,7 @@ int main() {
     std::string proxy_url = read_config("proxy_config.txt");
 
     if (conn_str.empty() || bot_token.empty()) {
-        std::cerr << "[ERROR] Отсутствуют файлы конфигурации БД или токена!" << std::endl;
+        std::cerr << "[ERROR] Отсутствуют файлы конфигурации!" << std::endl;
         return 1;
     }
 
@@ -152,23 +190,18 @@ int main() {
         TgBot::Bot bot(bot_token);
 
         bot.getEvents().onCommand("start", [&bot](TgBot::Message::Ptr message) {
-            std::string text = "Система лидогенерации активна.\n\n"
-                               "/active - Сканировать площадки\n"
-                               "/archive - Поиск по архиву";
+            std::string text = "Бот для парсинга БУТБ запущен.\n\n/active - Сканировать площадку";
             bot.getApi().sendMessage(message->chat->id, text);
         });
 
         bot.getEvents().onCommand("active", [&bot, &conn_str, &proxy_url](TgBot::Message::Ptr message) {
-            bot.getApi().sendMessage(message->chat->id, "Сканирую площадки Icetrade и Goszakupki...");
-            
-            std::string final_report = "<b>АКТИВНЫЕ ТЕНДЕРЫ</b>\n\n";
-            final_report += parse_icetrade(conn_str, proxy_url);
-            final_report += parse_goszakupki(conn_str, proxy_url);
+            bot.getApi().sendMessage(message->chat->id, "Сканирую БУТБ с применением фильтров, ожидайте...");
+            std::string final_report = parse_butb(conn_str, proxy_url, message->chat->id);
             
             bot.getApi().sendMessage(message->chat->id, final_report, nullptr, nullptr, nullptr, "HTML");
         });
 
-        std::cout << "[OK] Бот запущен..." << std::endl;
+        std::cout << "[OK] Бот запущен" << std::endl;
         TgBot::TgLongPoll longPoll(bot);
         while (true) {
             longPoll.start();
