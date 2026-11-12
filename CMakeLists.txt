@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 find_package(libpqxx CONFIG REQUIRED)
 find_package(TgBot CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(backend_app main.cpp)
-target_link_libraries(backend_app PRIVATE libpqxx::pqxx TgBot::TgBot cpr::cpr nlohmann_json::nlohmann_json)
+target_link_libraries(backend_app PRIVATE libpqxx::pqxx TgBot::TgBot cpr::cpr)
