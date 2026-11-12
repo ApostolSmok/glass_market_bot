@@ -115,16 +115,23 @@ std::string parse_butb(const std::string& conn_str, const std::string& proxy_url
 
     cpr::Response res3 = session.Post();
 
-    std::regex row_regex(R"-(<tr[^>]*>[\s\S]*?>([A-Z]+\d+)[\s\S]*?>([\d&#;,\s]+)</span>[\s\S]*?BYN[\s\S]*?</tr>)-");
-    std::sregex_iterator currentMatch(res3.text.begin(), res3.text.end(), row_regex);
-    std::sregex_iterator lastMatch;
-
     try {
         pqxx::connection C(conn_str);
         pqxx::work W(C);
 
-        while (currentMatch != lastMatch) {
-            std::smatch sm = *currentMatch;
+        std::regex safe_regex(R"-(>([A-Z]+\d+)[\s\S]*?>([\d&#;,\s]+)</span>[\s\S]*?BYN)-");
+        
+        size_t pos = 0;
+        while ((pos = res3.text.find("<tr", pos)) != std::string::npos) {
+            size_t end_pos = res3.text.find("</tr>", pos);
+            if (end_pos == std::string::npos) break;
+            
+            std::string row_html = res3.text.substr(pos, end_pos - pos);
+            pos = end_pos + 5;
+            
+            std::smatch sm;
+            if (!std::regex_search(row_html, sm, safe_regex)) continue;
+
             std::string tender_number = sm[1].str();
             std::string raw_price = sm[2].str();
 
@@ -137,7 +144,6 @@ std::string parse_butb(const std::string& conn_str, const std::string& proxy_url
                     price_value = std::stod(raw_price);
                 }
             } catch (const std::exception&) {
-                currentMatch++;
                 continue; 
             }
 
@@ -163,7 +169,6 @@ std::string parse_butb(const std::string& conn_str, const std::string& proxy_url
                     found_new = true;
                 }
             }
-            currentMatch++;
         }
         W.commit();
     } catch (const std::exception& e) {
