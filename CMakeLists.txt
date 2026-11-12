@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.10)
-set(CMAKE_TOOLCHAIN_FILE "C:/Artiom/vcpkg/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
 project(GlassMarketApp)
 set(CMAKE_CXX_STANDARD 20)
 

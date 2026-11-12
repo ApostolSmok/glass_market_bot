@@ -1,5 +1,4 @@
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -180,8 +179,6 @@ std::string parse_butb(const std::string& conn_str, const std::string& proxy_url
 }
 
 int main() {
-    SetConsoleOutputCP(CP_UTF8);
-
     std::string conn_str = read_config("db_config.txt");
     std::string bot_token = read_config("bot_token.txt");
     std::string proxy_url = read_config("proxy_config.txt");
