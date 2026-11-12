@@ -154,7 +154,7 @@ std::string parse_butb(const std::string& conn_str, const std::string& proxy_url
                     RETURNING id;
                 )";
 
-                std::string tender_url = "https://zakupki.butb.by/auctions/reestrauctions.html";
+                std::string tender_url = "https://zakupki.butb.by/auctions/reestrauctions.html" + tender_number;
                 pqxx::result R = W.exec(sql, pqxx::params{tender_number, "BUTB", "См. на сайте", std::to_string(price_value), tender_url, chat_id});
 
                 if (!R.empty()) {
@@ -163,7 +163,7 @@ std::string parse_butb(const std::string& conn_str, const std::string& proxy_url
                     std::string formatted_price = stream.str();
                     report += "<b>Тендер:</b> <code>" + tender_number + "</code>\n";
                     report += "Сумма: <b>" + formatted_price + " BYN</b>\n";
-                    report += "<a href='https://zakupki.butb.by/auctions/reestrauctions.html'>Перейти на БУТБ</a>\n\n";
+                    report += "<a href='" + tender_url + "'>Перейти на БУТБ</a>\n\n";
                     
                     found_new = true;
                 }
