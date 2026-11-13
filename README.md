@@ -1,13 +1,14 @@
 # Glass Market Bot (glass_market_bot)
 
 ## Overview
-Telegram bot backend written in C++ designed for monitoring and parsing of the Belarusian Universal Commodity Exchange (BUTB). The bot tracks procurement tenders related to glass products (OKRB code 23.12.13.300) with a budget exceeding 4000 BYN. 
+Telegram bot backend written in C++ designed for monitoring and parsing procurement tenders from the Belarusian Universal Commodity Exchange (BUTB) and the PPT trading platform. The bot tracks tenders related to glass products with a budget exceeding 4000 BYN. Filtering is executed based on OKRB code 23.12.13.300 for the main BUTB platform and TN VED codes 7007 and 7008 for the PPT platform.
 
 Live Bot Username: [@glassmarket1235_bot](https://t.me/glassmarket1235_bot)
 
 ## Key Features
-*   **Automated Parsing:** Bypasses dynamic JS/JSF forms on the BUTB platform using simulated HTTP POST/GET requests and ViewState management.
+*   **Dual-Strategy Automated Parsing:** Bypasses dynamic JS/JSF forms on the BUTB platform using simulated HTTP POST/GET requests and ViewState management, while seamlessly interacting with the PPT platform via RESTful JSON API payloads.
 *   **Memory-Safe Processing:** Utilizes custom string-chunking algorithms combined with regex to parse large HTML payloads without stack overflow issues.
+*   **Interactive UI:** Implements Telegram Reply and Inline Keyboards for seamless user interaction and on-demand scanning triggers without relying on manual command input.
 *   **Persistent Storage:** Integrates with PostgreSQL to store tender history and prevent duplicate notifications.
 *   **Proxy Support:** Configurable HTTP/HTTPS proxy support for network environments requiring proxy routing.
 *   **System Integration:** Designed to run continuously as a systemd service on Linux (Ubuntu) environments.
@@ -18,7 +19,7 @@ The system is designed to be deployed on an Ubuntu-based server.
 *   **Compiler:** GCC supporting C++20 standard.
 *   **Build Systems:** CMake (>= 3.10), Make, vcpkg (C++ Package Manager).
 *   **Database:** PostgreSQL.
-*   **Libraries (via vcpkg):** `tgbot-cpp`, `cpr`, `libpqxx`.
+*   **Libraries (via vcpkg):** `tgbot-cpp`, `cpr`, `libpqxx`, `nlohmann-json`.
 
 ## Configuration
 Before compiling and running, you must create the following configuration files in the root directory (these are excluded via `.gitignore` for security):
@@ -34,7 +35,7 @@ Before compiling and running, you must create the following configuration files 
    ```bash
    sudo -u postgres psql
    ```
-2. Execute the commands found in second part of `script.sql` to initialize the `butb_db` database, create the `botuser`, assign privileges, and create the `tenders` table.
+2. Execute the commands found in the second part of `script.sql` to initialize the `butb_db` database, create the `botuser`, assign privileges, and create the `tenders` table.
 
 ## Compilation Instructions
 The project utilizes `vcpkg` for dependency management. 
