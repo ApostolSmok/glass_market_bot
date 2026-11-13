@@ -192,15 +192,52 @@ int main() {
         TgBot::Bot bot(bot_token);
 
         bot.getEvents().onCommand("start", [&bot](TgBot::Message::Ptr message) {
-            std::string text = "Бот для парсинга БУТБ запущен.\n\n/active - Сканировать площадку";
-            bot.getApi().sendMessage(message->chat->id, text);
+            TgBot::ReplyKeyboardMarkup::Ptr replyMarkup(new TgBot::ReplyKeyboardMarkup);
+            replyMarkup->resizeKeyboard = true;
+            
+            std::vector<TgBot::KeyboardButton::Ptr> row;
+            TgBot::KeyboardButton::Ptr btnStart(new TgBot::KeyboardButton);
+            btnStart->text = "Начать";
+            btnStart->requestContact = false;
+            btnStart->requestLocation = false;
+            row.push_back(btnStart);
+            replyMarkup->keyboard.push_back(row);
+
+            bot.getApi().sendMessage(message->chat->id, "Нажмите «Начать»", nullptr, nullptr, replyMarkup);
         });
 
-        bot.getEvents().onCommand("active", [&bot, &conn_str, &proxy_url](TgBot::Message::Ptr message) {
-            bot.getApi().sendMessage(message->chat->id, "Сканирую БУТБ с применением фильтров, ожидайте...");
-            std::string final_report = parse_butb(conn_str, proxy_url, message->chat->id);
-            
-            bot.getApi().sendMessage(message->chat->id, final_report, nullptr, nullptr, nullptr, "HTML");
+        bot.getEvents().onNonCommandMessage([&bot](TgBot::Message::Ptr message) {
+            if (message->text == "Начать") {
+                TgBot::InlineKeyboardMarkup::Ptr inlineMarkup(new TgBot::InlineKeyboardMarkup);
+                std::vector<TgBot::InlineKeyboardButton::Ptr> row;
+                
+                TgBot::InlineKeyboardButton::Ptr btnScan(new TgBot::InlineKeyboardButton);
+                btnScan->text = "Поиск тендеров";
+                btnScan->callbackData = "scan_butb"; 
+                row.push_back(btnScan);
+                inlineMarkup->inlineKeyboard.push_back(row);
+
+                bot.getApi().sendMessage(message->chat->id, "Главное меню. Выберите действие:", nullptr, nullptr, inlineMarkup);
+            }
+        });
+
+        bot.getEvents().onCallbackQuery([&bot, &conn_str, &proxy_url](TgBot::CallbackQuery::Ptr query) {
+            if (query->data == "scan_butb") {
+                bot.getApi().answerCallbackQuery(query->id);
+                
+                bot.getApi().sendMessage(query->message->chat->id, "Сканирую БУТБ с применением фильтров, ожидайте...");
+                
+                std::string final_report = parse_butb(conn_str, proxy_url, query->message->chat->id);
+                TgBot::InlineKeyboardMarkup::Ptr repeatMarkup(new TgBot::InlineKeyboardMarkup);
+                std::vector<TgBot::InlineKeyboardButton::Ptr> repeatRow;
+                TgBot::InlineKeyboardButton::Ptr btnRepeat(new TgBot::InlineKeyboardButton);
+                btnRepeat->text = "Повторный поиск";
+                btnRepeat->callbackData = "scan_butb"; 
+                repeatRow.push_back(btnRepeat);
+                repeatMarkup->inlineKeyboard.push_back(repeatRow);
+
+                bot.getApi().sendMessage(query->message->chat->id, final_report, nullptr, nullptr, repeatMarkup, "HTML");
+            }
         });
 
         std::cout << "[OK] Бот запущен" << std::endl;
