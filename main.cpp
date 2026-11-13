@@ -8,6 +8,8 @@
 #include <cpr/cpr.h>
 #include <iomanip>
 #include <sstream>
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
 
 std::string read_config(const std::string& filename) {
     std::ifstream file(filename);
@@ -178,6 +180,79 @@ std::string parse_butb(const std::string& conn_str, const std::string& proxy_url
     return report;
 }
 
+std::string parse_ppt(const std::string& conn_str, const std::string& proxy_url, int64_t chat_id) {
+    std::string report = "<b>Результаты торгов на ППТ (Стекло):</b>\n\n";
+    bool found_new = false;
+    cpr::Session session;
+
+    session.SetUrl(cpr::Url{"https://ppt.butb.by/PPT-Rest/api/search"}); 
+    
+    if (!proxy_url.empty()) session.SetProxies(cpr::Proxies{{"http", proxy_url}, {"https", proxy_url}});
+    
+    session.SetHeader(cpr::Header{
+        {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"},
+        {"Content-Type", "application/json"}
+    });
+
+    std::vector<std::string> target_filters = {"7007", "7008"};
+
+    try {
+        pqxx::connection C(conn_str);
+        pqxx::work W(C);
+
+        for (const auto& filter : target_filters) {
+            json payload = {
+                {"searchFilters", filter},
+                {"searchType", "BYTNVED"},
+                {"searchCatalog", "DEMANDS"}
+            };
+            session.SetBody(cpr::Body{payload.dump()});
+
+            cpr::Response res = session.Post();
+            if (res.status_code != 200) {
+                report += "Ошибка API для кода " + filter + ". Код: " + std::to_string(res.status_code) + "\n";
+                continue; 
+            }
+
+            json response_json = json::parse(res.text);
+
+            for (const auto& item : response_json["listDemands"]) { 
+                std::string tender_number = std::to_string(item["id"].get<int64_t>()); 
+                double price_value = item["fullCost"].get<double>(); 
+                
+                if (price_value >= 4000.0) {
+                    std::string sql = R"(
+                        INSERT INTO tenders (tender_number, platform, status, budget, url, chat_id) 
+                        VALUES ($1, $2, $3, $4, $5, $6) 
+                        ON CONFLICT (tender_number, chat_id) DO NOTHING 
+                        RETURNING id;
+                    )";
+
+                    std::string tender_url = "https://ppt.butb.by/orders/?lang=ru&order_type=demands&order_number=" + tender_number;
+                    
+                    pqxx::result R = W.exec(sql, pqxx::params{tender_number, "PPT", "Активен", std::to_string(price_value), tender_url, chat_id});
+
+                    if (!R.empty()) {
+                        std::stringstream stream;
+                        stream << std::fixed << std::setprecision(2) << price_value;
+                        
+                        report += "<b>Торги ППТ (" + filter + "):</b> <code>" + tender_number + "</code>\n";
+                        report += "Сумма: <b>" + stream.str() + " BYN</b>\n";
+                        report += "<a href='" + tender_url + "'>Перейти на ППТ</a>\n\n";
+                        found_new = true;
+                    }
+                }
+            }
+        }
+        W.commit();
+    } catch (const std::exception& e) {
+        return report + "<b>Ошибка БД/JSON:</b> " + std::string(e.what()) + "\n";
+    }
+
+    if (!found_new) report += "Новых торгов от 4000 BYN на ППТ не найдено.\n";
+    return report;
+}
+
 int main() {
     std::string conn_str = read_config("db_config.txt");
     std::string bot_token = read_config("bot_token.txt");
@@ -224,15 +299,31 @@ int main() {
         bot.getEvents().onCallbackQuery([&bot, &conn_str, &proxy_url](TgBot::CallbackQuery::Ptr query) {
             if (query->data == "scan_butb") {
                 bot.getApi().answerCallbackQuery(query->id);
-                
                 bot.getApi().sendMessage(query->message->chat->id, "Сканирую БУТБ с применением фильтров, ожидайте...");
                 
                 std::string final_report = parse_butb(conn_str, proxy_url, query->message->chat->id);
+                
                 TgBot::InlineKeyboardMarkup::Ptr repeatMarkup(new TgBot::InlineKeyboardMarkup);
                 std::vector<TgBot::InlineKeyboardButton::Ptr> repeatRow;
                 TgBot::InlineKeyboardButton::Ptr btnRepeat(new TgBot::InlineKeyboardButton);
                 btnRepeat->text = "Повторный поиск";
-                btnRepeat->callbackData = "scan_butb"; 
+                btnRepeat->callbackData = "scan_butb";
+                repeatRow.push_back(btnRepeat);
+                repeatMarkup->inlineKeyboard.push_back(repeatRow);
+
+                bot.getApi().sendMessage(query->message->chat->id, final_report, nullptr, nullptr, repeatMarkup, "HTML");
+
+            } else if (query->data == "scan_ppt") {
+                bot.getApi().answerCallbackQuery(query->id);
+                bot.getApi().sendMessage(query->message->chat->id, "Сканирую ППТ, ожидайте...");
+                
+                std::string final_report = parse_ppt(conn_str, proxy_url, query->message->chat->id);
+                
+                TgBot::InlineKeyboardMarkup::Ptr repeatMarkup(new TgBot::InlineKeyboardMarkup);
+                std::vector<TgBot::InlineKeyboardButton::Ptr> repeatRow;
+                TgBot::InlineKeyboardButton::Ptr btnRepeat(new TgBot::InlineKeyboardButton);
+                btnRepeat->text = "Повторный поиск ППТ";
+                btnRepeat->callbackData = "scan_ppt";
                 repeatRow.push_back(btnRepeat);
                 repeatMarkup->inlineKeyboard.push_back(repeatRow);
 
